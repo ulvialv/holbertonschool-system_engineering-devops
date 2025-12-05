@@ -1,0 +1,86 @@
+Title: Scale Up — Split Web, Application, and Database Servers
+
+A user visits www.foobar.com. DNS resolves the domain to a load-balancer cluster composed of two HAProxy nodes running in an Active-Passive configuration using a virtual IP. If the active HAProxy fails, the passive node immediately becomes active, ensuring high availability.
+
+The request flow:
+User → DNS → HAProxy Cluster (Active-Passive) → Web Server → Application Server → Database Server
+
+Infrastructure Components:
+1. New server added (for component separation)
+2. HAProxy Load-Balancer cluster (2 nodes)
+3. Web Server host (Nginx only)
+4. Application Server host (Gunicorn/WSGI or similar)
+5. Dedicated Database Server (MySQL)
+
+---------------------------------------------------------------------
+
+Why each additional element is added
+
+1. Additional Server
+- This server allows us to separate roles rather than running all services on the same machine.
+- Separation improves performance, reduces resource contention, and improves maintainability.
+- It also makes scaling easier: we can add more web servers, app servers, or database replicas independently.
+
+2. HAProxy Load-Balancer configured as a cluster
+- The load-balancer becomes highly available through Active-Passive failover.
+- If the active HAProxy node goes down, the passive node takes over automatically using a virtual IP.
+- This removes the load-balancer as a Single Point of Failure (SPOF).
+- Clustering ensures uninterrupted user access and more resilient infrastructure.
+
+3. Split Web Server (Nginx)
+- The web server’s job is to handle static files, SSL termination (if used), request routing, and connection management.
+- Offloading this from the application server improves speed and reduces overhead.
+- Scaling: multiple web servers can be added easily behind the load-balancer.
+
+4. Dedicated Application Server
+- The application server executes the business logic and interacts with the database.
+- Keeping it separate ensures it is not overloaded by static content or HTTP connection handling.
+- It allows scaling application logic horizontally — add more application servers without touching web or database servers.
+
+5. Dedicated Database Server (MySQL)
+- Isolating the database improves performance consistency and security.
+- Databases are resource-intensive (I/O, memory), so running them alone prevents conflict with web/app processes.
+- Makes it possible to implement replication (Primary–Replica) and future backup/failover strategies.
+
+---------------------------------------------------------------------
+
+High-Level Diagram (Text Format)
+
+         +-----------------------------+
+         |        Users (Internet)     |
+         +-----------------------------+
+                       |
+                       v
+         +-----------------------------+
+         |   HAProxy Cluster (VIP)     |
+         | Active LB <-> Passive LB    |
+         +-----------------------------+
+                       |
+                       v
+         +-----------------------------+
+         |         Web Server          |
+         |            Nginx            |
+         +-----------------------------+
+                       |
+                       v
+         +-----------------------------+
+         |     Application Server      |
+         |   (e.g., Gunicorn/WSGI)     |
+         +-----------------------------+
+                       |
+                       v
+         +-----------------------------+
+         |       Database Server       |
+         |            MySQL            |
+         +-----------------------------+
+
+---------------------------------------------------------------------
+
+Summary
+This scale-up design improves:
+- Availability (load-balancer cluster)
+- Performance (services split by role)
+- Scalability (add more servers where needed)
+- Maintainability (each component isolated and easier to update or debug)
+
+By separating the web, application, and database layers and adding a high-availability load-balancer, the infrastructure becomes more robust and production-ready.
