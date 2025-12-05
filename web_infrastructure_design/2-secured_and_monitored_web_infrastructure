@@ -1,0 +1,105 @@
+Title: Secured and Monitored Web Infrastructure — three-server design (www.foobar.com)
+
+A user types "www.foobar.com" in their browser. DNS resolves the domain to the public IP of the load balancer.
+
+Logical Diagram:
+User → DNS → HAProxy (Load Balancer) → [Server A, Server B]
+Each server (A and B) contains:
+  - Nginx (web server)
+  - Application server
+  - Application files (codebase)
+  - MySQL (local instance)
+Additionally:
+  - 3 host-based firewalls (one on each server)
+  - 1 SSL/TLS certificate for www.foobar.com
+  - 3 monitoring clients/agents (one on each server) sending logs/metrics to a collector
+
+1. Why each additional element is added
+- Host-based firewalls (3 total):
+  - Each server runs a host firewall (e.g., ufw/iptables/nftables). These reduce attack surface by allowing only required inbound/outbound ports (e.g., 443 to HAProxy, 80 optionally internal, 22 from admin IPs, 3306 only from internal addresses).
+  - Having a firewall per server enforces defense-in-depth even if network ACLs fail.
+- SSL/TLS certificate:
+  - Provides end-to-end encryption on HTTPS for www.foobar.com to protect confidentiality and integrity.
+  - Prevents eavesdropping and man-in-the-middle attacks between the user and your edge.
+- Monitoring clients (3 agents):
+  - Each server runs a metrics/log collection agent (e.g., SumoLogic collector, Prometheus node_exporter + pushgateway, or Datadog agent).
+  - Agents collect system metrics (CPU, memory, disk), application metrics, webserver metrics, and logs and securely push or expose them to the monitoring backend for dashboards and alerting.
+
+2. What firewalls are for
+- Firewalls protect servers by filtering network traffic based on rules.
+- They block unwanted ports and IPs, allow only trusted management access, and isolate services (for example, ensuring MySQL port 3306 is not reachable from the public internet).
+- Together with network ACLs and security groups, they form layered network security.
+
+3. Why traffic is served over HTTPS
+- HTTPS encrypts the HTTP payload, preventing passive eavesdropping and active tampering.
+- Modern browsers expect HTTPS for secure features (e.g., secure cookies, service workers) and may flag non-HTTPS sites.
+- HTTPS also authenticates the server (via the certificate), giving users assurance they talk to the real www.foobar.com.
+
+4. What monitoring is used for
+- Monitoring provides observability: metrics, logs, traces.
+- Use cases:
+  - Health checks and uptime monitoring.
+  - Performance metrics (latency, QPS, response codes).
+  - System metrics (CPU, memory, disk, network).
+  - Alerting on thresholds (e.g., CPU > 85%, replication lag > threshold).
+  - Centralized logs for troubleshooting (access logs, error logs, application logs).
+
+5. How the monitoring tool collects data
+- Agent-based model (example):
+  - Install an agent on each server (SumoLogic Collector, Datadog Agent, or Prometheus node_exporter).
+  - The agent collects host metrics (proc, load), tail-follows logs (nginx access/error, app logs), and collects application metrics exposed on local endpoints.
+  - Agents securely send data to the monitoring/aggregation service over TLS to an ingestion endpoint (push model) or expose metrics on `/metrics` for a Prometheus server to scrape (pull model).
+- Log collection:
+  - The agent tails log files and forwards structured/unstructured logs to the collector with metadata (hostname, service).
+- Metrics:
+  - Nginx + application exporters expose metrics; agent scrapes or forwards them.
+
+6. How to monitor web server QPS (queries per second)
+- Option A — Nginx + Prometheus:
+  - Enable `stub_status` or install an Nginx Prometheus exporter.
+  - Prometheus scrapes the exporter endpoint and collects `nginx_http_requests_total` (a counter).
+  - Compute QPS by taking the rate over a time window: `rate(nginx_http_requests_total[1m])`.
+  - Visualize in Grafana and set alerts if QPS drops or exceeds expected thresholds.
+- Option B — Log-based (SumoLogic / ELK):
+  - Collect Nginx access logs; run a query that counts requests per minute grouped by status code or path.
+  - Create dashboards and alerts when requests/sec exceed or fall below expected values.
+- Option C — Application metrics:
+  - Instrument the application (e.g., with Prometheus client) to emit request counters and latencies; scrape these metrics and calculate QPS.
+
+7. Issues with this infrastructure and explanations
+
+a) Why terminating SSL at the load balancer level can be an issue
+- If TLS is terminated at HAProxy and traffic from HAProxy to backend servers is plain HTTP, internal traffic is unencrypted — a risk if the internal network is not completely trusted.
+- Client IP preservation: depending on configuration, backend may not see the real client IP unless HAProxy adds `X-Forwarded-For` and webserver trusts it.
+- Mutual authentication: if you require mutual TLS between client and backend or end-to-end encryption, terminating at LB breaks that model.
+- Compliance: some regulations require encryption in transit across all hops (end-to-end). If TLS is terminated, you must re-encrypt to backends (TLS passthrough or re-encryption).
+
+Mitigations:
+- Use TLS passthrough for sensitive flows or re-encrypt traffic between HAProxy and backends.
+- Use a private network for backend traffic and also enable TLS for backend connections (HAProxy → Nginx over HTTPS with proper certs).
+
+b) Why having only one MySQL server capable of accepting writes is an issue
+- Single writable master is a write bottleneck and a single point of failure for write operations.
+- If the Primary fails, writes stop until a failover and promotion of a replica are performed; this can lead to downtime or data loss if not managed carefully.
+- Replication lag means newly promoted node might be slightly behind; careful failover procedures and possible data reconciliation are needed.
+- Mitigation: implement automatic failover (e.g., Orchestrator, MHA) or use a multi-primary cluster technology (Galera) or a managed HA database service.
+
+c) Why having servers with identical full stacks (DB + web + app on same hosts) might be problematic
+- Resource contention: database I/O and web/app processes could compete for CPU, memory, and disk on the same host causing unpredictable performance.
+- Scaling complexity: scaling read or write tiers independently is harder when all roles are collocated.
+- Fault blast radius: if a server fails due to app bug or heavy traffic, you lose both app and the local DB instance, increasing impact.
+- Operational complexity: backups, maintenance windows, and upgrades become more complex because roles are mixed.
+- Best practice: separate concerns — put databases on dedicated DB nodes, app servers on stateless nodes, and use shared storage or dedicated data stores when needed.
+
+8. Recommended improvements (short)
+- Ensure HAProxy is redundant (Active-Active or Active-Passive with keepalived) to remove LB SPOF.
+- Use TLS everywhere or at least re-encrypt HAProxy→backend traffic.
+- Move databases to dedicated nodes or managed HA DB to isolate DB failures and scale independently.
+- Harden host firewalls and network ACLs; restrict SSH to admin IPs and use key-based auth.
+- Centralize logs and metrics, add dashboards and alerting (Prometheus + Grafana, or SumoLogic dashboards).
+- Implement automated backup and tested restore procedures and test failover scenarios.
+
+Diagram (compact):
+User → DNS → HAProxy (TLS) → Server A (nginx, app, MySQL) [firewall + monitoring agent]
+                            → Server B (nginx, app, MySQL) [firewall + monitoring agent]
+Each server has a host firewall and a monitoring client that securely forwards logs/metrics to the monitoring backend.
