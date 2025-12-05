@@ -1,0 +1,57 @@
+A user wants to access the website and types “www.foobar.com” in their browser.
+
+1. Domain Resolution
+- The domain name “foobar.com” is registered and configured with a DNS A record:
+  www.foobar.com → 8.8.8.8
+- The role of the domain name is to map a human-readable address to the server’s IP address.
+- The “www” record is an A record (IPv4 mapping).
+
+2. Single Server Infrastructure (IP: 8.8.8.8)
+The entire website is hosted on one physical/virtual server. The server contains:
+
+a) Web Server (Nginx)
+- Receives HTTP/HTTPS requests from the user’s browser.
+- Serves static content (CSS, JS, images).
+- Forwards dynamic requests to the application server.
+
+b) Application Server
+- Runs the application code (business logic).
+- Processes dynamic requests and generates HTML/JSON responses.
+
+c) Application Files (Code Base)
+- The code that implements the website’s logic.
+- Executed by the application server.
+
+d) Database (MySQL)
+- Stores persistent data such as users, posts, or transactions.
+- The application server communicates with MySQL for reading/writing data.
+
+3. Communication
+- The user's computer communicates with the server using HTTP/HTTPS over TCP.
+- Nginx → Application Server (internal communication).
+- Application Server → MySQL (local database connection).
+
+4. Definitions
+- Server: A machine that provides services/resources to clients over a network.
+- Role of domain name: Converts readable names into IP addresses.
+- Web server role: Handles HTTP traffic, serves static files, and forwards dynamic requests.
+- Application server role: Runs the application logic and generates dynamic content.
+- Database role: Stores structured persistent data.
+
+5. Issues with this Infrastructure
+a) SPOF (Single Point of Failure)
+- Everything runs on one server.
+- If the server goes down, the entire website becomes unavailable.
+
+b) Downtime During Maintenance
+- Deploying new code, rebooting services, updating packages, or restarting Nginx/MySQL
+  causes downtime because the system has no redundancy.
+
+c) Cannot Scale
+- A single server cannot handle large traffic.
+- CPU, RAM, disk I/O, and database load reach limits quickly.
+- No load balancing or horizontal scaling possible.
+
+Diagram:
+
+User → DNS → Nginx (Web Server) → Application Server → MySQL (Database)
